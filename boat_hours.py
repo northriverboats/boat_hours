@@ -5,9 +5,13 @@ import os
 import sys
 import datetime
 import pymssql
+import click
 from dotenv import load_dotenv
 from envelopes import Envelope
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font
 from smtplib import SMTPException # allow for silent fail in try exceptio
+
 
 
 def resource_path(relative_path: str) -> str:
@@ -175,7 +179,82 @@ def nice_number(hours, dept):
         return "       "
     return f"{hours.get(dept):7.2f}"
 
-def main():
+def text_report(results):
+    output = "Boat        Fabrication      Paint     Canvas Outfitting\n"
+    output += "----------  -----------  ---------  --------- ----------\n"
+    for result in results:
+        buffer = f"{result[0]:14.12}  "
+        buffer += nice_number(result[1], 'Fab')
+        buffer += "    " + nice_number(result[1], 'Pai')
+        buffer += "    " + nice_number(result[1], 'Can')
+        buffer += "    " + nice_number(result[1], 'Out')
+        output += buffer + "\n"
+    return output
+
+def send_email(text_results):
+    output = "<p>Here is the Department Hours by Boat Report for %s.</p>\n<br />\n"%(datetime.date.today())
+    output += "<pre>\n" + text_results + "\n</pre>\n"
+    subject = "Department Hours by Boat Report for %s.\n\n"%(datetime.date.today())
+    mail_results(subject, output)
+
+def write_spreadsheet(results):
+    """Write results as a spreadsheet"""
+    wb = Workbook()
+    sh = wb.active
+    bold = Font(bold=True)
+    sh.column_dimensions['A'].width = 16
+    sh.column_dimensions['B'].width = 12
+    sh.column_dimensions['C'].width = 12
+    sh.column_dimensions['D'].width = 12
+    sh.column_dimensions['E'].width = 12
+    sh['A1'].font = bold
+    sh['B1'].font =  bold
+    sh['C1'].font =  bold
+    sh['D1'].font =  bold
+    sh['E1'].font =  bold
+    sh["A1"] = "Boat"
+    sh["B1"] = "Fabrication"
+    sh["C1"] = "Paint"
+    sh["D1"] = "Canvas"
+    sh["E1"] = "Outfitting"
+
+    for y, result in enumerate(results, start=2):
+        sh[f"A{y}"] = result[0]
+        sh[f"B{y}"] = result[1].get('Fab', '')
+        sh[f"C{y}"] = result[1].get('Pai', '')
+        sh[f"D{y}"] = result[1].get('Can', '')
+        sh[f"E{y}"] = result[1].get('Out', '')
+        sh[f"B{y}"].number_format = '#,##0.00'
+        sh[f"C{y}"].number_format = '#,##0.00'
+        sh[f"D{y}"].number_format = '#,##0.00'
+        sh[f"E{y}"].number_format = '#,##0.00'
+
+    #Change background color of even rows
+    """
+    for rows in sh.iter_rows(min_row=1, max_row=1, min_col=None, max_col=5):
+        for cell in rows:
+            cell.fill = PatternFill(start_color="A0A0A0", end_color="A0A0A0",fill_type = "solid")
+    for rows in sh.iter_rows(min_row=2, max_row=y, min_col=None, max_col=5):
+        for cell in rows:
+            if not cell.row % 2:
+                cell.fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0",fill_type = "solid")
+    """
+    sh.freeze_panes = "A2"
+    sh.print_title_rows='1:1'
+    file_name = datetime.datetime.today().strftime(
+            os.environ.get('XLS_PATH','/tmp/') +
+            os.environ.get('XLS_NAME','temp.xlsx'))
+    # wb.save("/tmp/bob/Department Hours by Boat Report for 2023-10-26.xlsx")
+    print(file_name)
+
+def message(verbose, limit, text):
+    if verbose >= limit:
+        click.echo(text)
+
+@click.command()
+@click.option('-v', '--verbose', count=True)
+@click.option('-d', '--debug', is_flag=True, default=False, help="Debug send no email")
+def main(verbose, debug):
     load_dotenv(dotenv_path=resource_path(".env"))
     with pymssql.connect(
             os.getenv('DB_HOST'),
@@ -186,20 +265,15 @@ def main():
         with conn.cursor() as cursor:
             jobs = sorted(get_boats(cursor))
             results = valid_jobs(cursor, jobs)
-    output = "<p>Here is the Department Hours by Boat Report for %s.</p>\n<br />\n"%(datetime.date.today())
-    output += "<pre>\n"
-    output += "Boat        Fabrication      Paint     Canvas Outfitting\n"
-    output += "----------  -----------  ---------  --------- ----------\n"
-    for result in results:
-        buffer = f"{result[0]:14.12}  "
-        buffer += nice_number(result[1], 'Fab')
-        buffer += "    " + nice_number(result[1], 'Pai')
-        buffer += "    " + nice_number(result[1], 'Can')
-        buffer += "    " + nice_number(result[1], 'Out')
-        output += buffer + "\n"
-    output += "</pre>\n"
-    subject = "Department Hours by Boat Report for %s.\n\n"%(datetime.date.today())
-    mail_results(subject, output)
+    text_results = text_report(results)
+    message(verbose, 2, text_results)
+    if debug:
+        print("debug mode email not sent")
+    else:
+        send_email(text_results)
+        print("email sent")
+    message(verbose, 1, "Writing Spreadsheet")
+    write_spreadsheet(results)
 
 
 if __name__ == "__main__":
