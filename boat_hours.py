@@ -31,78 +31,6 @@ def resource_path(relative_path: str) -> str:
 
     return os.path.join(base_path, relative_path)
 
-
-def split_address(email_address):
-    """Return a tuple of (address, name), name may be an empty string
-       Can convert the following forms
-         exaple@example.com
-         <example@exmaple.con>
-         Example <example@example.com>
-         Example<example@example.com>
-    """
-    address = email_address.split('<')
-    if len(address) == 1:
-        return (address[0], '')
-    if address[0]:
-        return (address[1][:-1], address[0].strip())
-    return (address[1][:-1], '')
-
-def mail_results(subject, body, attachment=''):
-    """ Send emial with html formatted body and parameters from env"""
-    envelope = Envelope(
-        from_addr=split_address(os.environ.get('MAIL_FROM')),
-        subject=subject,
-        html_body=body
-    )
-
-    # add standard recepients
-    tos = os.environ.get('MAIL_TO','').split(',')
-    if tos[0]:
-        for to in tos:
-            envelope.add_to_addr(to)
-
-    # add carbon coppies
-    ccs = os.environ.get('MAIL_CC','').split(',')
-    if ccs[0]:
-        for cc in ccs:
-            envelope.add_cc_addr(cc)
-
-    # add blind carbon copies recepients
-    bccs = os.environ.get('MAIL_BCC','').split(',')
-    if bccs[0]:
-        for bcc in bccs:
-            envelope.add_bcc_addr(bcc)
-
-    if attachment:
-        envelope.add_attachment(attachment)
-
-    # send the envelope using an ad-hoc connection...
-    try:
-        _ = envelope.send(
-            os.environ.get('MAIL_SERVER'),
-            port=os.environ.get('MAIL_PORT'),
-            login=os.environ.get('MAIL_LOGIN'),
-            password=os.environ.get('MAIL_PASSWORD'),
-            tls=True
-        )
-    except SMTPException:
-        print("SMTP EMail error")
-
-def send_email(output):
-    """xxxx"""
-    htmlText = """<p>Here is the Lag Time Report for %s.</p><br /><br/><pre>"""%(datetime.date.today())
-    htmlText += outupt  + "</pre>"
-
-    plainText = """Here is the Lag Time Report for %s."""%(datetime.date.today())
-    plainText += "\n\n" + outupt
-
-    mail_results(
-    'Labor By Boat for %s'%(datetime.date.today()),
-    htmlText,
-    text=plainText)
-
-
-
 def get_boats(cursor):
     """Get the list of jobs 
 
@@ -191,13 +119,7 @@ def text_report(results):
         output += buffer + "\n"
     return output
 
-def send_email(text_results):
-    output = "<p>Here is the Department Hours by Boat Report for %s.</p>\n<br />\n"%(datetime.date.today())
-    output += "<pre>\n" + text_results + "\n</pre>\n"
-    subject = "Department Hours by Boat Report for %s.\n\n"%(datetime.date.today())
-    mail_results(subject, output)
-
-def write_spreadsheet(results):
+def write_spreadsheet(results, verbose):
     """Write results as a spreadsheet"""
     wb = Workbook()
     sh = wb.active
@@ -244,8 +166,8 @@ def write_spreadsheet(results):
     file_name = datetime.datetime.today().strftime(
             os.environ.get('XLS_PATH','/tmp/') +
             os.environ.get('XLS_NAME','temp.xlsx'))
-    # wb.save("/tmp/bob/Department Hours by Boat Report for 2023-10-26.xlsx")
-    print(file_name)
+    wb.save(file_name)
+    message(verbose, 1, f"Writing Spreadsheet {file_name}")
 
 def message(verbose, limit, text):
     if verbose >= limit:
@@ -268,12 +190,10 @@ def main(verbose, debug):
     text_results = text_report(results)
     message(verbose, 2, text_results)
     if debug:
-        print("debug mode email not sent")
+        print(text_results)
+        message(verbose, 0, "Debug enabled, not writitng spreadsheet")
     else:
-        send_email(text_results)
-        print("email sent")
-    message(verbose, 1, "Writing Spreadsheet")
-    write_spreadsheet(results)
+        write_spreadsheet(results, verbose)
 
 
 if __name__ == "__main__":
