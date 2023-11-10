@@ -1,3 +1,4 @@
+click
 emailer @ git+https://github.com/northriverboats/emailer.git
 Envelopes
 openpyxl
